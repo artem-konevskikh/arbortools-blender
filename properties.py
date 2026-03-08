@@ -215,7 +215,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     )
     max_points: bpy.props.IntProperty(
         name="Max Points",
-        default=5_000_000,
+        default=15_000_000,
         min=1000,
         description="Hard limit on total point count",
     )

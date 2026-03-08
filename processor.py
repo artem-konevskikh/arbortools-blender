@@ -367,7 +367,7 @@ def main():
         "--algorithm", choices=["farneback", "dis"], default="farneback"
     )
     parser.add_argument("--resize-percent", type=int, default=None)
-    parser.add_argument("--max-points", type=int, default=5_000_000)
+    parser.add_argument("--max-points", type=int, default=15_000_000)
     parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument("--end-frame", type=int, default=0)
     # Farneback parameters

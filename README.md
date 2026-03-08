@@ -119,7 +119,7 @@ Parameters shown depend on the selected method.
 | Parameter | Default | Methods | Description |
 | --- | --- | --- | --- |
 | Resize for Flow | 50% | Optical Flow | Downscale factor before computing optical flow |
-| Max Points | 5,000,000 | All | Hard limit on total point count |
+| Max Points | 15,000,000 | All | Hard limit on total point count |
 
 ### Scale
 
