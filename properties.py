@@ -2,6 +2,8 @@
 
 import bpy
 
+from .defaults import DEFAULTS
+
 
 def _update_video_file(self, context):
     """Read frame count when video file changes and set end_frame."""
@@ -86,13 +88,13 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     # --- Sampling ---
     skip_frames: bpy.props.IntProperty(
         name="Skip Frames",
-        default=5,
+        default=DEFAULTS["skip_frames"],
         min=1,
         description="Process every N-th frame",
     )
     skip_pixels: bpy.props.IntProperty(
         name="Skip Pixels",
-        default=2,
+        default=DEFAULTS["skip_pixels"],
         min=1,
         description="Sample every N-th pixel",
     )
@@ -100,34 +102,34 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     # --- Filtering ---
     flow_threshold: bpy.props.FloatProperty(
         name="Flow Threshold",
-        default=0.01,
+        default=DEFAULTS["flow_threshold"],
         min=0.0,
         max=1.0,
         description="Minimum normalized speed to include a point",
     )
     max_speed_clip: bpy.props.FloatProperty(
         name="Max Speed Clip",
-        default=50.0,
+        default=DEFAULTS["max_speed_clip"],
         min=1.0,
         description="Upper bound for speed normalization (px/frame)",
     )
     brightness_min: bpy.props.IntProperty(
         name="Brightness Min",
-        default=0,
+        default=DEFAULTS["brightness_min"],
         min=0,
         max=255,
         description="Minimum pixel brightness to include (0 = no limit)",
     )
     brightness_max: bpy.props.IntProperty(
         name="Brightness Max",
-        default=127,
+        default=DEFAULTS["brightness_max"],
         min=0,
         max=255,
         description="Maximum pixel brightness to include (255 = no limit)",
     )
     diff_threshold: bpy.props.FloatProperty(
         name="Diff Threshold",
-        default=10.0,
+        default=DEFAULTS["diff_threshold"],
         min=0.0,
         max=255.0,
         description="Minimum pixel difference magnitude to include a point",
@@ -140,11 +142,11 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
             ("FARNEBACK", "Farneback", "High quality, slower"),
             ("DIS", "DIS", "Fast preview quality"),
         ],
-        default="FARNEBACK",
+        default=DEFAULTS["algorithm"].upper(),
     )
     pyr_scale: bpy.props.FloatProperty(
         name="Pyramid Scale",
-        default=0.5,
+        default=DEFAULTS["pyr_scale"],
         min=0.1,
         max=0.9,
         description=(
@@ -154,7 +156,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     )
     levels: bpy.props.IntProperty(
         name="Levels",
-        default=3,
+        default=DEFAULTS["levels"],
         min=1,
         max=8,
         description=(
@@ -164,7 +166,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     )
     winsize: bpy.props.IntProperty(
         name="Window Size",
-        default=15,
+        default=DEFAULTS["winsize"],
         min=5,
         max=50,
         description=(
@@ -174,7 +176,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     )
     iterations: bpy.props.IntProperty(
         name="Iterations",
-        default=3,
+        default=DEFAULTS["iterations"],
         min=1,
         max=10,
         description=(
@@ -188,7 +190,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
             ("5", "5", "Faster, works well for most videos"),
             ("7", "7", "Smoother results, better for complex motion"),
         ],
-        default="5",
+        default=str(DEFAULTS["poly_n"]),
         description=(
             "Size of the pixel neighborhood used to estimate motion. "
             "5 is faster, 7 is smoother"
@@ -196,7 +198,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     )
     poly_sigma: bpy.props.FloatProperty(
         name="Poly Sigma",
-        default=1.2,
+        default=DEFAULTS["poly_sigma"],
         min=1.0,
         max=2.0,
         description=(
@@ -208,14 +210,14 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     # --- Processing ---
     resize_percent: bpy.props.IntProperty(
         name="Resize for Flow (%)",
-        default=50,
+        default=DEFAULTS["resize_percent"],
         min=25,
         max=100,
         description="Downscale frames before computing optical flow",
     )
     max_points: bpy.props.IntProperty(
         name="Max Points",
-        default=15_000_000,
+        default=DEFAULTS["max_points"],
         min=1000,
         description="Hard limit on total point count",
     )
@@ -223,7 +225,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     # --- Scale ---
     point_distance: bpy.props.FloatProperty(
         name="Point Distance",
-        default=0.01,
+        default=DEFAULTS["point_distance"],
         min=0.001,
         soft_min=0.01,
         soft_max=10.0,
@@ -231,7 +233,7 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
     )
     layer_distance: bpy.props.FloatProperty(
         name="Layer Distance",
-        default=0.01,
+        default=DEFAULTS["layer_distance"],
         min=0.001,
         soft_min=0.01,
         soft_max=10.0,

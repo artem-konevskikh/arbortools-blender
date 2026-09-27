@@ -1,7 +1,24 @@
 """Write binary little-endian PLY files with optical-flow attributes."""
 
-import struct
 import numpy as np
+
+# Packed little-endian layout, 35 bytes per vertex (same as struct "<3f3B4fi")
+VERTEX_DTYPE = np.dtype(
+    [
+        ("x", "<f4"),
+        ("y", "<f4"),
+        ("z", "<f4"),
+        ("red", "u1"),
+        ("green", "u1"),
+        ("blue", "u1"),
+        ("speed", "<f4"),
+        ("angle", "<f4"),
+        ("flow_x", "<f4"),
+        ("flow_y", "<f4"),
+        ("frame_index", "<i4"),
+    ]
+)
+CHUNK = 1_000_000
 
 
 def write_ply(filepath, points, colors, attrs, frame_indices):
@@ -40,30 +57,14 @@ def write_ply(filepath, points, colors, attrs, frame_indices):
         "end_header\n"
     )
 
-    # Ensure correct dtypes
-    points = np.ascontiguousarray(points, dtype=np.float32)
-    colors = np.ascontiguousarray(colors, dtype=np.uint8)
-    attrs = np.ascontiguousarray(attrs, dtype=np.float32)
-    frame_indices = np.ascontiguousarray(frame_indices, dtype=np.int32)
-
     with open(filepath, "wb") as f:
         f.write(header.encode("ascii"))
-
-        # Pack vertex data: 3f + 3B + 4f + 1i = 35 bytes per vertex
-        for i in range(n):
-            f.write(
-                struct.pack(
-                    "<3f3B4fi",
-                    points[i, 0],
-                    points[i, 1],
-                    points[i, 2],
-                    colors[i, 0],
-                    colors[i, 1],
-                    colors[i, 2],
-                    attrs[i, 0],
-                    attrs[i, 1],
-                    attrs[i, 2],
-                    attrs[i, 3],
-                    frame_indices[i],
-                )
-            )
+        # Chunked so the packed copy adds ~35 MB peak, not 35 bytes * n
+        for s in range(0, n, CHUNK):
+            e = min(s + CHUNK, n)
+            v = np.empty(e - s, dtype=VERTEX_DTYPE)
+            v["x"], v["y"], v["z"] = points[s:e].T
+            v["red"], v["green"], v["blue"] = colors[s:e].T
+            v["speed"], v["angle"], v["flow_x"], v["flow_y"] = attrs[s:e].T
+            v["frame_index"] = frame_indices[s:e]
+            v.tofile(f)

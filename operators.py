@@ -70,8 +70,8 @@ def _build_params_preview(props):
     return params
 
 
-def _run_in_thread(params):
-    """Run process_video in background thread."""
+def _run_in_thread(work, params):
+    """Run work(params, ...) in background thread, recording result in _state."""
     progress = _state["progress"]
     cancel = _state["cancel_event"]
 
@@ -81,7 +81,7 @@ def _run_in_thread(params):
         progress["message"] = message
 
     try:
-        result = process_video(params, progress_callback=callback, cancel_event=cancel)
+        result = work(params, progress_callback=callback, cancel_event=cancel)
         progress["output_path"] = result
     except Exception as e:
         progress["error"] = str(e)
@@ -89,7 +89,7 @@ def _run_in_thread(params):
         progress["done"] = True
 
 
-def _start_processing(operator, context, params):
+def _start_processing(operator, context, params, work=process_video):
     """Common logic to start background processing and modal timer."""
     props = context.scene.optflow
 
@@ -108,7 +108,7 @@ def _start_processing(operator, context, params):
 
     _state["thread"] = threading.Thread(
         target=_run_in_thread,
-        args=(params,),
+        args=(work, params),
         daemon=True,
     )
     _state["thread"].start()
@@ -119,8 +119,27 @@ def _start_processing(operator, context, params):
     return {"RUNNING_MODAL"}
 
 
-def _modal_handler(operator, context, event):
-    """Common modal logic for generate/preview operators."""
+def _import_result(operator, props, output_path):
+    """Import the generated PLY into the scene."""
+    try:
+        obj = import_ply_to_blender(output_path)
+        props.progress_text = f"Done — {obj.name} imported."
+        operator.report({"INFO"}, f"Point cloud imported: {obj.name}")
+    except Exception as e:
+        props.progress_text = f"Import error: {e}"
+        operator.report({"ERROR"}, f"PLY import failed: {e}")
+        return {"CANCELLED"}
+    return {"FINISHED"}
+
+
+def _report_flow_video(operator, props, output_path):
+    props.progress_text = f"Done — {output_path}"
+    operator.report({"INFO"}, f"Flow video saved: {output_path}")
+    return {"FINISHED"}
+
+
+def _modal_handler(operator, context, event, on_done=_import_result):
+    """Common modal logic: poll progress, then call on_done with the output path."""
     if event.type != "TIMER":
         return {"PASS_THROUGH"}
 
@@ -149,20 +168,11 @@ def _modal_handler(operator, context, event):
 
     output_path = progress.get("output_path")
     if output_path is None:
-        props.progress_text = "Cancelled or no points generated."
+        props.progress_text = "Cancelled or no output generated."
         operator.report({"WARNING"}, "No output generated")
         return {"CANCELLED"}
 
-    try:
-        obj = import_ply_to_blender(output_path)
-        props.progress_text = f"Done — {obj.name} imported."
-        operator.report({"INFO"}, f"Point cloud imported: {obj.name}")
-    except Exception as e:
-        props.progress_text = f"Import error: {e}"
-        operator.report({"ERROR"}, f"PLY import failed: {e}")
-        return {"CANCELLED"}
-
-    return {"FINISHED"}
+    return on_done(operator, props, output_path)
 
 
 def _cancel_handler(context):
@@ -173,96 +183,6 @@ def _cancel_handler(context):
     if _state["cancel_event"] is not None:
         _state["cancel_event"].set()
     context.scene.optflow.is_processing = False
-
-
-def _run_flow_video_in_thread(params):
-    """Run generate_flow_video in background thread."""
-    progress = _state["progress"]
-    cancel = _state["cancel_event"]
-
-    def callback(current, total, message):
-        progress["current"] = current
-        progress["total"] = total
-        progress["message"] = message
-
-    try:
-        result = generate_flow_video(
-            params, progress_callback=callback, cancel_event=cancel
-        )
-        progress["output_path"] = result
-    except Exception as e:
-        progress["error"] = str(e)
-    finally:
-        progress["done"] = True
-
-
-def _start_flow_video_processing(operator, context, params):
-    """Start background flow video processing with modal timer."""
-    props = context.scene.optflow
-
-    _state["cancel_event"] = threading.Event()
-    _state["progress"] = {
-        "done": False,
-        "error": None,
-        "message": "Starting...",
-        "current": 0,
-        "total": 0,
-        "output_path": None,
-    }
-
-    props.is_processing = True
-    props.progress_text = "Starting..."
-
-    _state["thread"] = threading.Thread(
-        target=_run_flow_video_in_thread,
-        args=(params,),
-        daemon=True,
-    )
-    _state["thread"].start()
-
-    wm = context.window_manager
-    _state["timer"] = wm.event_timer_add(0.1, window=context.window)
-    wm.modal_handler_add(operator)
-    return {"RUNNING_MODAL"}
-
-
-def _flow_video_modal_handler(operator, context, event):
-    """Modal logic for flow video operator (no PLY import)."""
-    if event.type != "TIMER":
-        return {"PASS_THROUGH"}
-
-    progress = _state["progress"]
-    props = context.scene.optflow
-
-    props.progress_text = progress.get("message", "")
-
-    for area in context.screen.areas:
-        if area.type == "VIEW_3D":
-            area.tag_redraw()
-
-    if not progress["done"]:
-        return {"PASS_THROUGH"}
-
-    # Processing finished — clean up
-    wm = context.window_manager
-    wm.event_timer_remove(_state["timer"])
-    _state["timer"] = None
-    props.is_processing = False
-
-    if progress["error"]:
-        props.progress_text = f"Error: {progress['error']}"
-        operator.report({"ERROR"}, progress["error"])
-        return {"CANCELLED"}
-
-    output_path = progress.get("output_path")
-    if output_path is None:
-        props.progress_text = "Cancelled."
-        operator.report({"WARNING"}, "Cancelled")
-        return {"CANCELLED"}
-
-    props.progress_text = f"Done — {output_path}"
-    operator.report({"INFO"}, f"Flow video saved: {output_path}")
-    return {"FINISHED"}
 
 
 class ARBORTOOLS_OT_generate(bpy.types.Operator):
@@ -429,10 +349,10 @@ class ARBORTOOLS_OT_generate_flow_video(bpy.types.Operator):
             poly_sigma=props.poly_sigma,
         )
 
-        return _start_flow_video_processing(self, context, params)
+        return _start_processing(self, context, params, generate_flow_video)
 
     def modal(self, context, event):
-        return _flow_video_modal_handler(self, context, event)
+        return _modal_handler(self, context, event, _report_flow_video)
 
     def cancel(self, context):
         _cancel_handler(context)

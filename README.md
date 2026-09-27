@@ -3,7 +3,8 @@
 A set of tools used to produce 3D point clouds for [Arbor](https://arbor.art).
 
 Generate a 3D point cloud from a video file using one of three methods:
-**Optical Flow**, **Frame Stacking**, or **Frame Difference**.
+**Optical Flow**, **Frame Stacking**, or **Frame Difference** — or render an
+**Optical Flow Video** that visualizes motion as color.
 Each layer of the cloud corresponds to a frame (or frame pair); each point carries
 3D coordinates, color, and per-vertex attributes.
 All attributes are available in Geometry Nodes via the **Named Attribute** node.
@@ -14,7 +15,7 @@ All attributes are available in Geometry Nodes via the **Named Attribute** node.
 
 1. Download or clone this repository.
 2. In Blender: **Edit → Preferences → Add-ons → Install from Disk…**
-3. Select the `optflow_pointcloud/` folder (or a `.zip` of it).
+3. Select a `.zip` of the repository folder (the add-on's root contains `__init__.py`).
 4. Enable **ArborTools** in the add-ons list.
 5. If OpenCV is not installed, the add-on will show an **Install Dependencies** button in the N-panel — click it and restart Blender.
 
@@ -24,9 +25,11 @@ All attributes are available in Geometry Nodes via the **Named Attribute** node.
 2. Switch to the **ArborTools** tab.
 3. Set a **Video File** (`.mp4`, `.mov`, `.avi`).
 4. Optionally set an **Output PLY** path (a temp file is used if left empty).
+   For **Optical Flow Video**, an **Output Video** path is required.
 5. Choose a **Method** (Optical Flow, Frame Stacking, or Frame Difference).
 6. Adjust parameters as needed (see below).
-7. Click **Preview** for a quick evaluation or **Generate Full** for final output.
+7. Click **Preview** for a quick evaluation or **Generate Full** for final output
+   (**Generate Flow Video** for the Optical Flow Video method).
 8. The resulting point cloud is automatically imported into the scene.
 
 ## Methods
@@ -55,8 +58,11 @@ is taken from the second frame.
 ### Optical Flow Video
 
 Generates an HSV-visualized flow video from optical flow computation between
-consecutive frames. Creates a video output where motion is visualized using
-color (hue) for direction and intensity (value) for magnitude.
+consecutive frames. Hue encodes motion direction; brightness encodes speed on a
+fixed scale (`0` → black, `Max Speed Clip` and above → full brightness), so
+brightness is comparable across frames. Uses the Optical Flow algorithm
+settings, Frame Range, Skip Frames and Resize for Flow. Optionally saves a PNG
+grid of flow frames next to the video (see **Flow Video** below).
 
 ## Parameters
 
@@ -65,7 +71,8 @@ color (hue) for direction and intensity (value) for magnitude.
 | Parameter | Description |
 | --- | --- |
 | Video File | Path to the input video |
-| Output PLY | Path for the output `.ply` file (optional) |
+| Output PLY | Path for the output `.ply` file (optional; point cloud methods) |
+| Output Video | Path for the output `.mp4` (required; Optical Flow Video only) |
 
 ### Method
 
@@ -88,7 +95,7 @@ color (hue) for direction and intensity (value) for magnitude.
 | Parameter | Default | Description |
 | --- | --- | --- |
 | Skip Frames | 5 | Process every N-th frame |
-| Skip Pixels | 2 | Sample every N-th pixel |
+| Skip Pixels | 2 | Sample every N-th pixel (point cloud methods) |
 
 ### Filtering
 
@@ -97,19 +104,19 @@ Parameters shown depend on the selected method.
 | Parameter | Default | Methods | Description |
 | --- | --- | --- | --- |
 | Flow Threshold | 0.01 | Optical Flow | Minimum normalized speed to keep a point (0.0–1.0) |
-| Max Speed Clip | 50.0 | Optical Flow | Upper bound for speed normalization (px/frame) |
+| Max Speed Clip | 50.0 | Optical Flow, Flow Video | Upper bound for speed normalization (px/frame) |
 | Diff Threshold | 10.0 | Frame Difference | Minimum pixel difference magnitude (0–255) |
-| Brightness Min | 0 | All | Minimum pixel brightness (0–255) |
-| Brightness Max | 255 | All | Binary threshold — pixels above this value are discarded |
+| Brightness Min | 0 | Point cloud methods | Minimum pixel brightness (0–255) |
+| Brightness Max | 127 | Point cloud methods | Binary threshold — pixels above this value are discarded |
 
-### Optical Flow (only visible when method is Optical Flow)
+### Optical Flow (only visible for Optical Flow and Optical Flow Video)
 
 | Parameter | Default | Description |
 | --- | --- | --- |
 | Algorithm | Farneback | `Farneback` (quality) or `DIS` (fast preview) |
 | Pyramid Scale | 0.5 | Farneback pyramid scale (0.1–0.9) |
 | Levels | 3 | Farneback pyramid levels (1–8) |
-| Winsize | 15 | Farneback window size (5–50) |
+| Window Size | 15 | Farneback window size (5–50) |
 | Iterations | 3 | Farneback iterations (1–10) |
 | Poly N | 5 | Farneback polynomial size (5 or 7) |
 | Poly Sigma | 1.2 | Farneback polynomial sigma (1.0–2.0) |
@@ -118,15 +125,23 @@ Parameters shown depend on the selected method.
 
 | Parameter | Default | Methods | Description |
 | --- | --- | --- | --- |
-| Resize for Flow | 50% | Optical Flow | Downscale factor before computing optical flow |
-| Max Points | 15,000,000 | All | Hard limit on total point count |
+| Resize for Flow | 50% | Optical Flow, Flow Video | Downscale factor before computing optical flow |
+| Max Points | 15,000,000 | Point cloud methods | Hard limit on total point count |
 
 ### Scale
 
 | Parameter | Default | Description |
 | --- | --- | --- |
-| Point Distance | 1.0 | Distance between points within a layer (XY scale) |
-| Layer Distance | 1.0 | Distance between layers along the Z axis |
+| Point Distance | 0.01 | Distance between points within a layer (XY scale) |
+| Layer Distance | 0.01 | Distance between layers along the Z axis |
+
+### Flow Video (only visible for Optical Flow Video)
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| Export Grid | Off | Also save a PNG grid of flow frames (same name as the video) |
+| Grid Size | 10x10 | Grid dimensions as `COLSxROWS`; frames are picked evenly if there are more than cells |
+| Show Frame Numbers | Off | Draw the source frame number in each grid cell |
 
 ## Buttons
 
@@ -134,7 +149,8 @@ Parameters shown depend on the selected method.
 | --- | --- |
 | **Preview** | Quick preview with aggressive sampling (Skip Frames x10, Skip Pixels x5; DIS + Resize 50% for Optical Flow) |
 | **Generate Full** | Full processing with the selected method and all parameters |
-| **Cancel** | Stop the background thread (partial results are not saved) |
+| **Generate Flow Video** | Render the flow video (Optical Flow Video method) |
+| **Cancel** | Stop the background thread (partial point cloud results are not saved) |
 
 ## Named Attributes in Geometry Nodes
 
@@ -151,7 +167,8 @@ After import, the point cloud object exposes these attributes:
 
 ## Standalone CLI
 
-`processor.py` and `ply_writer.py` can run outside Blender for batch processing:
+`processor.py` (with `ply_writer.py`) and `flow_video.py` run outside Blender for
+batch processing (requires `opencv-python` and `numpy`). CLI defaults match the add-on.
 
 ```bash
 # Optical Flow (default)
@@ -162,20 +179,25 @@ python processor.py --video input.mp4 --output output.ply --method frame_stackin
 
 # Frame Difference
 python processor.py --video input.mp4 --output output.ply --method frame_difference --skip-frames 5 --skip-pixels 3 --diff-threshold 10
+
+# Optical Flow Video (+ optional 10x10 PNG grid with frame numbers)
+python flow_video.py --video input.mp4 --output flow.mp4 --export-grid 10x10 --num
 ```
 
-Run `python processor.py --help` for all available options.
+Run `python processor.py --help` or `python flow_video.py --help` for all available options.
 
 ## File Structure
 
 ```bash
-optflow_pointcloud/
+arbortools-blender/
 ├── __init__.py          # bl_info, registration, dependency check
-├── operators.py         # Generate, Preview, Cancel, Install Dependencies
+├── operators.py         # Generate, Preview, Flow Video, Cancel, file browsers
 ├── panels.py            # N-panel UI (main panel + dependency panel)
 ├── properties.py        # PropertyGroup with all parameters
+├── defaults.py          # Default values shared by add-on and CLIs (no bpy)
 ├── processor.py         # Video processing pipeline (no bpy)
 ├── ply_writer.py        # Binary PLY writer (no bpy)
+├── flow_video.py        # Optical flow visualization video (no bpy)
 └── blender_importer.py  # PLY import into Blender scene
 ```
 

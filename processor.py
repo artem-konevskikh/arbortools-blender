@@ -9,9 +9,13 @@ import numpy as np
 
 # Allow running as both `python -m optflow_pointcloud.processor` and `python processor.py`
 try:
+    from .defaults import DEFAULTS
+    from .flow_video import compute_flow, make_dis
     from .ply_writer import write_ply
 except ImportError:
     sys.path.insert(0, os.path.dirname(__file__))
+    from defaults import DEFAULTS
+    from flow_video import compute_flow, make_dis
     from ply_writer import write_ply
 
 
@@ -19,7 +23,7 @@ class VideoOpenError(Exception):
     """Raised when the video file cannot be opened."""
 
 
-def _process_optical_flow_pair(prev_frame, frame, params, scale):
+def _process_optical_flow_pair(prev_frame, frame, params, scale, dis):
     """Compute optical flow between two frames and collect points.
 
     Returns (points, colors, attrs, frame_indices) or None.
@@ -32,22 +36,7 @@ def _process_optical_flow_pair(prev_frame, frame, params, scale):
     prev_gray = cv2.cvtColor(small_prev, cv2.COLOR_BGR2GRAY)
     curr_gray = cv2.cvtColor(small_curr, cv2.COLOR_BGR2GRAY)
 
-    if params.algorithm == "farneback":
-        flow = cv2.calcOpticalFlowFarneback(  # ty: ignore[no-matching-overload]
-            prev_gray,
-            curr_gray,
-            None,
-            params.pyr_scale,
-            params.levels,
-            params.winsize,
-            params.iterations,
-            params.poly_n,
-            params.poly_sigma,
-            0,
-        )
-    else:  # dis
-        dis = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
-        flow = dis.calc(prev_gray, curr_gray, None)  # ty: ignore[no-matching-overload]
+    flow = compute_flow(prev_gray, curr_gray, params, dis)
 
     # 3. Scale flow back to original resolution
     h, w = frame.shape[:2]
@@ -206,6 +195,8 @@ def process_video(params, progress_callback=None, cancel_event=None):
             print(msg)
 
     method = getattr(params, "method", "optical_flow")
+    if params.max_speed_clip <= 0:
+        raise ValueError("max_speed_clip must be > 0")
 
     cap = cv2.VideoCapture(params.video)
     if not cap.isOpened():
@@ -232,6 +223,7 @@ def process_video(params, progress_callback=None, cancel_event=None):
         )
     else:
         scale = 1.0
+    dis = make_dis(params.algorithm)
 
     all_points = []
     all_colors = []
@@ -265,7 +257,9 @@ def process_video(params, progress_callback=None, cancel_event=None):
                 prev_frame = frame
                 continue
             if method == "optical_flow":
-                result = _process_optical_flow_pair(prev_frame, frame, params, scale)
+                result = _process_optical_flow_pair(
+                    prev_frame, frame, params, scale, dis
+                )
             else:  # frame_difference
                 result = _process_frame_difference_pair(prev_frame, frame, params)
             prev_frame = frame
@@ -356,60 +350,36 @@ def main():
         choices=["optical_flow", "frame_stacking", "frame_difference"],
         default="optical_flow",
     )
-    parser.add_argument("--skip-frames", type=int, default=None)
-    parser.add_argument("--skip-pixels", type=int, default=None)
-    parser.add_argument("--flow-threshold", type=float, default=0.01)
-    parser.add_argument("--max-speed-clip", type=float, default=50.0)
-    parser.add_argument("--brightness-min", type=int, default=0)
-    parser.add_argument("--brightness-max", type=int, default=127)
-    parser.add_argument("--diff-threshold", type=float, default=10.0)
+    parser.add_argument("--skip-frames", type=int)
+    parser.add_argument("--skip-pixels", type=int)
+    parser.add_argument("--flow-threshold", type=float)
+    parser.add_argument("--max-speed-clip", type=float)
+    parser.add_argument("--brightness-min", type=int)
+    parser.add_argument("--brightness-max", type=int)
+    parser.add_argument("--diff-threshold", type=float)
     parser.add_argument(
-        "--algorithm", choices=["farneback", "dis"], default="farneback"
+        "--algorithm", choices=["farneback", "dis"]
     )
-    parser.add_argument("--resize-percent", type=int, default=None)
-    parser.add_argument("--max-points", type=int, default=15_000_000)
+    parser.add_argument("--resize-percent", type=int)
+    parser.add_argument("--max-points", type=int)
     parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument("--end-frame", type=int, default=0)
     # Farneback parameters
-    parser.add_argument("--pyr-scale", type=float, default=0.5)
-    parser.add_argument("--levels", type=int, default=5)
-    parser.add_argument("--winsize", type=int, default=21)
-    parser.add_argument("--iterations", type=int, default=5)
-    parser.add_argument("--poly-n", type=int, default=7)
-    parser.add_argument("--poly-sigma", type=float, default=1.5)
-    parser.add_argument("--point-distance", type=float, default=0.01)
-    parser.add_argument("--layer-distance", type=float, default=0.01)
+    parser.add_argument("--pyr-scale", type=float)
+    parser.add_argument("--levels", type=int)
+    parser.add_argument("--winsize", type=int)
+    parser.add_argument("--iterations", type=int)
+    parser.add_argument("--poly-n", type=int)
+    parser.add_argument("--poly-sigma", type=float)
+    parser.add_argument("--point-distance", type=float)
+    parser.add_argument("--layer-distance", type=float)
 
+    parser.set_defaults(**DEFAULTS)
     args = parser.parse_args()
-
-    # Apply algorithm-specific defaults for params not explicitly provided
-    if args.method == "optical_flow":
-        if args.algorithm == "dis":
-            if args.skip_frames is None:
-                args.skip_frames = 10
-            if args.skip_pixels is None:
-                args.skip_pixels = 5
-            if args.resize_percent is None:
-                args.resize_percent = 25
-        else:  # farneback
-            if args.skip_frames is None:
-                args.skip_frames = 5
-            if args.skip_pixels is None:
-                args.skip_pixels = 2
-            if args.resize_percent is None:
-                args.resize_percent = 75
-    else:
-        # frame_stacking / frame_difference — simpler defaults
-        if args.skip_frames is None:
-            args.skip_frames = 5
-        if args.skip_pixels is None:
-            args.skip_pixels = 2
-        if args.resize_percent is None:
-            args.resize_percent = 100
 
     try:
         process_video(args)
-    except VideoOpenError as e:
+    except (VideoOpenError, ValueError) as e:
         print(f"Error: {e}")
         sys.exit(1)
 

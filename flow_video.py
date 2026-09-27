@@ -7,24 +7,40 @@ import sys
 import cv2
 import numpy as np
 
+# Allow running as both a package module and `python flow_video.py`
+try:
+    from .defaults import DEFAULTS
+except ImportError:
+    sys.path.insert(0, os.path.dirname(__file__))
+    from defaults import DEFAULTS
 
-def compute_flow(prev_gray, curr_gray, algorithm, fb_params):
-    """Compute optical flow between two grayscale frames."""
-    if algorithm == "farneback":
+
+def make_dis(algorithm):
+    """Return a reusable DIS instance for the "dis" algorithm, else None."""
+    if algorithm == "dis":
+        return cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+    return None
+
+
+def compute_flow(prev_gray, curr_gray, params, dis):
+    """Compute optical flow between two grayscale frames.
+
+    `params` carries algorithm + Farneback settings; `dis` comes from make_dis().
+    """
+    if params.algorithm == "farneback":
         return cv2.calcOpticalFlowFarneback(  # ty: ignore[no-matching-overload]
             prev_gray,
             curr_gray,
             None,
-            fb_params["pyr_scale"],
-            fb_params["levels"],
-            fb_params["winsize"],
-            fb_params["iterations"],
-            fb_params["poly_n"],
-            fb_params["poly_sigma"],
+            params.pyr_scale,
+            params.levels,
+            params.winsize,
+            params.iterations,
+            params.poly_n,
+            params.poly_sigma,
             0,
         )
     else:
-        dis = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
         return dis.calc(prev_gray, curr_gray, None)  # ty: ignore[no-matching-overload]
 
 
@@ -80,12 +96,13 @@ def build_grid(
 def flow_to_hsv(flow, max_speed_clip):
     """Convert optical flow to an HSV image (hue=direction, value=magnitude)."""
     mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-    mag = np.clip(mag, 0, max_speed_clip)
 
     hsv = np.zeros((*flow.shape[:2], 3), dtype=np.uint8)
     hsv[..., 0] = (ang * 180 / np.pi / 2).astype(np.uint8)  # hue: 0-179
     hsv[..., 1] = 255  # full saturation
-    hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)  # ty: ignore[no-matching-overload]
+    # Fixed scale (not per-frame min-max) so brightness is comparable across frames;
+    # convertScaleAbs saturates at 255, i.e. clips at max_speed_clip
+    hsv[..., 2] = cv2.convertScaleAbs(mag, alpha=255.0 / max_speed_clip)
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
 
@@ -116,6 +133,9 @@ def generate_flow_video(params, progress_callback=None, cancel_event=None):
         else:
             print(msg)
 
+    if params.max_speed_clip <= 0:
+        raise RuntimeError("max_speed_clip must be > 0")
+
     cap = cv2.VideoCapture(params.video)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video '{params.video}'")
@@ -139,15 +159,6 @@ def generate_flow_video(params, progress_callback=None, cancel_event=None):
     if not writer.isOpened():
         raise RuntimeError(f"Cannot create output video '{params.output}'")
 
-    fb_params = {
-        "pyr_scale": params.pyr_scale,
-        "levels": params.levels,
-        "winsize": params.winsize,
-        "iterations": params.iterations,
-        "poly_n": params.poly_n,
-        "poly_sigma": params.poly_sigma,
-    }
-
     # Parse grid dimensions
     export_grid = getattr(params, "export_grid", None)
     grid_numbers = getattr(params, "grid_numbers", False)
@@ -164,6 +175,7 @@ def generate_flow_video(params, progress_callback=None, cancel_event=None):
     all_frame_numbers = [] if export_grid else None
 
     algorithm = params.algorithm
+    dis = make_dis(algorithm)
 
     _report(
         0,
@@ -206,7 +218,7 @@ def generate_flow_video(params, progress_callback=None, cancel_event=None):
             prev_gray = gray
             continue
 
-        flow = compute_flow(prev_gray, gray, algorithm, fb_params)
+        flow = compute_flow(prev_gray, gray, params, dis)
         vis = flow_to_hsv(flow, params.max_speed_clip)
         writer.write(vis)
         if all_vis_frames is not None:
@@ -260,20 +272,17 @@ def main():
     parser.add_argument(
         "--algorithm",
         choices=["farneback", "dis"],
-        default="farneback",
-        help="Optical flow algorithm (default: farneback)",
+        help="Optical flow algorithm (default: %(default)s)",
     )
     parser.add_argument(
         "--resize-percent",
         type=int,
-        default=100,
-        help="Downscale frames before computing flow (default: 100)",
+        help="Downscale frames before computing flow (default: %(default)s)",
     )
     parser.add_argument(
         "--max-speed-clip",
         type=float,
-        default=50.0,
-        help="Upper bound for magnitude normalization (default: 50.0)",
+        help="Upper bound for magnitude normalization (default: %(default)s)",
     )
     parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument(
@@ -285,8 +294,7 @@ def main():
     parser.add_argument(
         "--skip-frames",
         type=int,
-        default=1,
-        help="Process every N-th frame (default: 1)",
+        help="Process every N-th frame (default: %(default)s)",
     )
     parser.add_argument(
         "--export-grid",
@@ -302,13 +310,14 @@ def main():
     )
 
     # Farneback parameters
-    parser.add_argument("--pyr-scale", type=float, default=0.5)
-    parser.add_argument("--levels", type=int, default=3)
-    parser.add_argument("--winsize", type=int, default=15)
-    parser.add_argument("--iterations", type=int, default=3)
-    parser.add_argument("--poly-n", type=int, default=5)
-    parser.add_argument("--poly-sigma", type=float, default=1.2)
+    parser.add_argument("--pyr-scale", type=float)
+    parser.add_argument("--levels", type=int)
+    parser.add_argument("--winsize", type=int)
+    parser.add_argument("--iterations", type=int)
+    parser.add_argument("--poly-n", type=int)
+    parser.add_argument("--poly-sigma", type=float)
 
+    parser.set_defaults(**DEFAULTS)
     args = parser.parse_args()
 
     from types import SimpleNamespace
