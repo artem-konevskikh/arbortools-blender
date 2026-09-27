@@ -23,10 +23,27 @@ class VideoOpenError(Exception):
     """Raised when the video file cannot be opened."""
 
 
-def _process_optical_flow_pair(prev_frame, frame, params, scale, dis):
+def _sample_mask(gray, params, rng):
+    """Brightness filter + pixel grid.
+
+    Density mode: keep chance ramps linearly from 1 at brightness_min to 0 at
+    brightness_max (bent by density_gamma), so darker regions get denser.
+    """
+    lo, hi = params.brightness_min, params.brightness_max
+    if params.density_mode:
+        p = np.clip((hi - gray.astype(np.float32)) / max(hi - lo, 1), 0.0, 1.0)
+        mask = rng.random(gray.shape, dtype=np.float32) < p**params.density_gamma
+    else:
+        mask = (gray >= lo) & (gray <= hi)
+    grid = np.zeros_like(mask)
+    grid[:: params.skip_pixels, :: params.skip_pixels] = True
+    return mask & grid
+
+
+def _process_optical_flow_pair(prev_frame, frame, params, scale, dis, rng):
     """Compute optical flow between two frames and collect points.
 
-    Returns (points, colors, attrs, frame_indices) or None.
+    Returns (xs, ys, colors, attrs, depth=0.0) or None.
     """
     # 1. Resize for flow computation
     small_prev = cv2.resize(prev_frame, (0, 0), fx=scale, fy=scale)
@@ -54,18 +71,9 @@ def _process_optical_flow_pair(prev_frame, frame, params, scale, dis):
         np.uint8
     )
 
-    # 6. Build mask — binary threshold discards bright pixels (same as stacking/diff)
+    # 6. Build mask
     gray = cv2.cvtColor(avg_color, cv2.COLOR_BGR2GRAY)
-    _, th = cv2.threshold(gray, params.brightness_max, 255, cv2.THRESH_BINARY)
-    bright_mask = th == 0  # pixels below brightness_max pass
-    mask = (
-        (speed_norm >= params.flow_threshold)
-        & bright_mask
-        & (gray >= params.brightness_min)
-    )
-    pixel_mask = np.zeros(frame.shape[:2], dtype=bool)
-    pixel_mask[:: params.skip_pixels, :: params.skip_pixels] = True
-    mask = mask & pixel_mask
+    mask = (speed_norm >= params.flow_threshold) & _sample_mask(gray, params, rng)
 
     # 7. Collect points
     ys, xs = np.where(mask)
@@ -82,44 +90,33 @@ def _process_optical_flow_pair(prev_frame, frame, params, scale, dis):
         ]
     ).astype(np.float32)
 
-    return xs, ys, colors, attrs
+    return xs, ys, colors, attrs, 0.0
 
 
-def _process_frame_stacking(frame, params):
+def _process_frame_stacking(frame, params, rng):
     """Convert a single frame into a point layer using brightness thresholding.
 
     Approach from the original img2points script: pixels below brightness_max
-    are kept (binary threshold), and depth = 1 - th/255 gives per-pixel Z
-    offset within the layer.
+    are kept, each at depth 1 within the layer.
 
-    Returns (xs, ys, colors, attrs, depth) or None.
+    Returns (xs, ys, colors, attrs, depth=1.0) or None.
     """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    _, th = cv2.threshold(gray, params.brightness_max, 255, cv2.THRESH_BINARY)
-    depth = 1.0 - th.astype(np.float32) / 255.0
-
-    # Mask: valid depth (dark pixels pass) AND above brightness_min
-    mask = (depth > 0) & (gray >= params.brightness_min)
-
-    # Pixel sampling
-    pixel_mask = np.zeros(frame.shape[:2], dtype=bool)
-    pixel_mask[:: params.skip_pixels, :: params.skip_pixels] = True
-    mask = mask & pixel_mask
+    mask = _sample_mask(gray, params, rng)
 
     ys, xs = np.where(mask)
     if len(xs) == 0:
         return None
 
     colors = frame[ys, xs][:, ::-1]  # BGR → RGB
-    point_depth = depth[ys, xs]
     attrs = np.zeros(
         (len(xs), 4), dtype=np.float32
     )  # speed=0, angle=0, flow_x=0, flow_y=0
 
-    return xs, ys, colors, attrs, point_depth
+    return xs, ys, colors, attrs, np.float32(1.0)  # float32 keeps Z rounding as before
 
 
-def _process_frame_difference_pair(prev_frame, frame, params):
+def _process_frame_difference_pair(prev_frame, frame, params, rng):
     """Compute absolute frame difference and collect points where change exceeds threshold.
 
     Uses diff magnitude as per-pixel Z-depth within each layer (approach from
@@ -142,13 +139,7 @@ def _process_frame_difference_pair(prev_frame, frame, params):
     mask = diff_bw >= diff_threshold
 
     # Brightness filter on grayscale of second frame (color source)
-    _, th = cv2.threshold(gray_curr, params.brightness_max, 255, cv2.THRESH_BINARY)
-    mask = mask & (th == 0) & (gray_curr >= params.brightness_min)
-
-    # Pixel sampling
-    pixel_mask = np.zeros(frame.shape[:2], dtype=bool)
-    pixel_mask[:: params.skip_pixels, :: params.skip_pixels] = True
-    mask = mask & pixel_mask
+    mask = mask & _sample_mask(gray_curr, params, rng)
 
     ys, xs = np.where(mask)
     if len(xs) == 0:
@@ -224,6 +215,7 @@ def process_video(params, progress_callback=None, cancel_event=None):
     else:
         scale = 1.0
     dis = make_dis(params.algorithm)
+    rng = np.random.default_rng(0)  # fixed seed → same input, same cloud
 
     all_points = []
     all_colors = []
@@ -250,7 +242,7 @@ def process_video(params, progress_callback=None, cancel_event=None):
 
         if method == "frame_stacking":
             # Every sampled frame becomes a layer — no prev_frame needed
-            result = _process_frame_stacking(frame, params)
+            result = _process_frame_stacking(frame, params, rng)
         else:
             # Both optical_flow and frame_difference need frame pairs
             if prev_frame is None:
@@ -258,31 +250,28 @@ def process_video(params, progress_callback=None, cancel_event=None):
                 continue
             if method == "optical_flow":
                 result = _process_optical_flow_pair(
-                    prev_frame, frame, params, scale, dis
+                    prev_frame, frame, params, scale, dis, rng
                 )
             else:  # frame_difference
-                result = _process_frame_difference_pair(prev_frame, frame, params)
+                result = _process_frame_difference_pair(
+                    prev_frame, frame, params, rng
+                )
             prev_frame = frame
 
         if result is None:
             layer_idx += 1
             continue
 
-        # Frame stacking and frame difference return an extra depth array
-        if method in ("frame_difference", "frame_stacking"):
-            xs, ys, colors, attrs, depth = result
-        else:
-            xs, ys, colors, attrs = result
-            depth = None
-
+        # depth: per-point array (frame difference) or a per-layer constant
+        xs, ys, colors, attrs, depth = result
         point_dist = getattr(params, "point_distance", 1.0)
         layer_dist = getattr(params, "layer_distance", 1.0)
         base_z = float(layer_idx) * layer_dist
-        if depth is not None:
-            # Per-pixel Z offset from diff magnitude (old diff2points approach)
-            z = (base_z + depth * layer_dist).astype(np.float32)
-        else:
-            z = np.full(len(xs), base_z, dtype=np.float32)
+        z = np.full(len(xs), base_z + depth * layer_dist, dtype=np.float32)
+        if params.jitter:
+            # Sub-pixel offset hides the pixel grid
+            dx, dy = rng.uniform(-0.5, 0.5, (2, len(xs)))
+            xs, ys = xs + dx, ys + dy
         points = np.column_stack([xs * point_dist, ys * point_dist, z]).astype(
             np.float32
         )
@@ -357,6 +346,13 @@ def main():
     parser.add_argument("--brightness-min", type=int)
     parser.add_argument("--brightness-max", type=int)
     parser.add_argument("--diff-threshold", type=float)
+    parser.add_argument(
+        "--density-mode",
+        action="store_true",
+        help="Darker pixels → denser points instead of a hard brightness cut",
+    )
+    parser.add_argument("--density-gamma", type=float)
+    parser.add_argument("--jitter", action="store_true", help="Random sub-pixel XY offset")
     parser.add_argument(
         "--algorithm", choices=["farneback", "dis"]
     )

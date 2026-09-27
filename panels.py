@@ -86,6 +86,12 @@ class ARBORTOOLS_PT_main_panel(bpy.types.Panel):
                 row = box.row(align=True)
                 row.prop(props, "brightness_min")
                 row.prop(props, "brightness_max")
+                row = box.row(align=True)
+                row.prop(props, "density_mode")
+                sub = row.row(align=True)
+                sub.active = props.density_mode
+                sub.prop(props, "density_gamma")
+                box.prop(props, "jitter")
 
         # --- Optical Flow ---
         if props.method in ("OPTICAL_FLOW", "OPTICAL_FLOW_VIDEO"):

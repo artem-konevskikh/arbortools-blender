@@ -108,6 +108,9 @@ Parameters shown depend on the selected method.
 | Diff Threshold | 10.0 | Frame Difference | Minimum pixel difference magnitude (0–255) |
 | Brightness Min | 0 | Point cloud methods | Minimum pixel brightness (0–255) |
 | Brightness Max | 127 | Point cloud methods | Binary threshold — pixels above this value are discarded |
+| Density Mode | off | Point cloud methods | Replaces the hard brightness cut with a ramp: pixels at/below Brightness Min always become points, at/above Brightness Max never, in between with chance proportional to darkness (random, fixed seed). Use Skip Pixels 1 and Brightness Max 255 for the full effect |
+| Density Gamma | 1.0 | Density Mode | Bends the ramp: >1 thins midtones, <1 fills them |
+| Jitter | off | Point cloud methods | Random sub-pixel XY offset to hide the pixel grid |
 
 ### Optical Flow (only visible for Optical Flow and Optical Flow Video)
 
@@ -179,6 +182,9 @@ python processor.py --video input.mp4 --output output.ply --method frame_stackin
 
 # Frame Difference
 python processor.py --video input.mp4 --output output.ply --method frame_difference --skip-frames 5 --skip-pixels 3 --diff-threshold 10
+
+# Frame Stacking with darkness-driven density
+python processor.py --video input.mp4 --output output.ply --method frame_stacking --skip-pixels 1 --brightness-max 255 --density-mode --density-gamma 1.5 --jitter
 
 # Optical Flow Video (+ optional 10x10 PNG grid with frame numbers)
 python flow_video.py --video input.mp4 --output flow.mp4 --export-grid 10x10 --num

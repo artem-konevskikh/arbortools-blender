@@ -127,6 +127,23 @@ class ArborToolsProperties(bpy.types.PropertyGroup):
         max=255,
         description="Maximum pixel brightness to include (255 = no limit)",
     )
+    density_mode: bpy.props.BoolProperty(
+        name="Density Mode",
+        default=DEFAULTS["density_mode"],
+        description="Darker pixels get denser points (Brightness Min = all, Max = none)",
+    )
+    density_gamma: bpy.props.FloatProperty(
+        name="Density Gamma",
+        default=DEFAULTS["density_gamma"],
+        min=0.1,
+        max=10.0,
+        description="Shapes the density ramp: >1 thins midtones, <1 fills them",
+    )
+    jitter: bpy.props.BoolProperty(
+        name="Jitter",
+        default=DEFAULTS["jitter"],
+        description="Random sub-pixel XY offset to hide the pixel grid",
+    )
     diff_threshold: bpy.props.FloatProperty(
         name="Diff Threshold",
         default=DEFAULTS["diff_threshold"],

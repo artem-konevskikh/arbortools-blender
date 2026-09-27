@@ -10,6 +10,9 @@ DEFAULTS = {
     "brightness_min": 0,
     "brightness_max": 127,
     "diff_threshold": 10.0,
+    "density_mode": False,
+    "density_gamma": 1.0,
+    "jitter": False,
     # Optical flow
     "algorithm": "farneback",
     "pyr_scale": 0.5,
