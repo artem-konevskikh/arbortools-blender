@@ -38,15 +38,14 @@ All attributes are available in Geometry Nodes via the **Named Attribute** node.
 
 Generates points from motion between consecutive frames. Each point carries
 normalized speed, direction angle, and raw flow displacement. Color is averaged
-from the frame pair. Pixels above `Brightness Max` are discarded via binary
-threshold; `Brightness Min` sets the lower bound.
+from the frame pair. Only pixels between `Brightness Min` and `Brightness Max`
+are kept (or see [Density Mode](#density-mode)).
 
 ### Frame Stacking
 
-Each sampled frame becomes a flat layer of colored points. A binary brightness
-threshold (`Brightness Max`) discards bright pixels; dark pixels that pass get a
-per-pixel Z offset within the layer (`depth = 1 - threshold_result / 255`).
-Color is taken directly from the frame.
+Each sampled frame becomes a flat layer of colored points. Only pixels between
+`Brightness Min` and `Brightness Max` are kept (or see
+[Density Mode](#density-mode)). Color is taken directly from the frame.
 
 ### Frame Difference
 
@@ -54,6 +53,20 @@ Points are generated where consecutive frames differ. The absolute difference
 magnitude is used as per-pixel Z-depth within each layer — stronger differences
 sit higher. Only pixels with difference above `Diff Threshold` are kept. Color
 is taken from the second frame.
+
+### Density Mode
+
+An option for all three point cloud methods above. Instead of a hard brightness
+cut, each pixel becomes a point with a chance based on how dark it is: pixels at
+or below `Brightness Min` always become points, pixels at or above `Brightness
+Max` never do, and the chance falls linearly in between (with Min 0 and Max 255:
+black = every pixel, 50% gray = about half, white = none). `Density Gamma` bends
+the ramp: above 1 thins the mid-grays, below 1 fills them in. The random pick
+uses a fixed seed, so the same input always gives the same cloud. Set
+`Skip Pixels` to 1 for the full effect.
+
+`Jitter` (works with or without Density Mode) shifts each point by up to half a
+pixel in X and Y to hide the pixel grid. Z is not jittered.
 
 ### Optical Flow Video
 
